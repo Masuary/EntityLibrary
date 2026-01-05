@@ -1,321 +1,271 @@
 package com.masuary.entitylibrary.client.screen;
 
 import com.masuary.entitylibrary.EntityLibraryMod;
-import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.TextComponent;
-import net.minecraft.network.chat.TranslatableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
-import net.minecraftforge.registries.ForgeRegistries;
 
-import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 /**
- * Simple in-game "library" screen that lists all registered entity types and renders a preview
- * without spawning/adding it to the world.
+ * Standalone client-only screen that lists registered LivingEntity types and renders a preview instance.
+ *
+ * The preview entity is instantiated client-side but is NOT added to the world.
  */
-public class EntityLibraryScreen extends Screen {
-    private static final int LIST_LEFT = 10;
-    private static final int LIST_WIDTH = 230;
+public final class EntityLibraryScreen extends Screen {
+    private static final int LIST_LEFT = 12;
+    private static final int LIST_WIDTH = 220;
+    private static final int ENTRY_HEIGHT = 18;
 
-    private final Screen previous;
+    private static final int TITLE_Y = 8;
+    private static final int SEARCH_H = 18;
+    // Extra padding keeps the first/last visible rows from being partially covered by
+    // AbstractSelectionList's top/bottom fade.
+    private static final int LIST_GAP = 8;
+
+    private static final int PADDING = 12;
+
+    private final Screen parent;
 
     private EditBox searchBox;
     private EntityTypeSelectionList list;
 
-    private final List<ResourceLocation> allEntityIds = new ArrayList<>();
-    private final List<ResourceLocation> filteredEntityIds = new ArrayList<>();
+    private int listTop;
+    private int listBottom;
 
-    /**
-     * When enabled, the left-hand list hides all non-living entity types.
-     * This is useful for a "monster/mob library" where only LivingEntity previews make sense.
-     */
-    private final boolean hideNonLivingEntityTypes = true;
+    private int previewScale = 60;
 
-    /**
-     * Cache for whether a given entity id produces a LivingEntity when instantiated on the client.
-     * We use instantiation as a pragmatic proxy because EntityType does not expose its base class directly.
-     */
-    private final Map<ResourceLocation, Boolean> livingTypeCache = new HashMap<>();
-
-    @Nullable
+    private LivingEntity previewEntity;
     private ResourceLocation selectedId;
 
-    @Nullable
-    private Entity previewEntity;
+    // Computed each frame
+    private int previewX1, previewY1, previewX2, previewY2;
 
-    @Nullable
-    private String previewError;
-
-    private int previewScale = 40;
-    private boolean userScaled = false;
-
-    public EntityLibraryScreen(@Nullable Screen previous) {
-        super(new TranslatableComponent("screen." + EntityLibraryMod.MODID + ".title"));
-        this.previous = previous;
-    }
-
-    public EntityLibraryScreen() {
-        this(null);
+    public EntityLibraryScreen(final Screen parent) {
+        super(Component.translatable("screen.entitylibrary.title"));
+        this.parent = parent;
     }
 
     @Override
     protected void init() {
-        Minecraft mc = Minecraft.getInstance();
+        final Minecraft mc = Minecraft.getInstance();
 
-        // Conservative: ensure per-open determinism (some modded entities can behave oddly if created
-        // without a fully-initialized client level). We'll recalc as needed.
-        this.livingTypeCache.clear();
+        final int searchY = TITLE_Y + this.font.lineHeight + 6;
+        final int doneY = this.height - 24;
 
-        // Build a stable, sorted list of all entity ids present in the registry.
-        allEntityIds.clear();
-        allEntityIds.addAll(ForgeRegistries.ENTITIES.getKeys());
-        allEntityIds.sort(Comparator
-                .comparing(ResourceLocation::getNamespace)
-                .thenComparing(ResourceLocation::getPath));
+        // We add a small gap above the first row (below the search box) and also ensure the
+        // bottom edge lands exactly on a row boundary. Otherwise, the last visible row can be
+        // partially clipped when the available height is not a multiple of ENTRY_HEIGHT.
+        this.listTop = searchY + SEARCH_H + LIST_GAP;
 
-        int listTop = 44;
-        int listBottom = this.height - 40;
+        final int bottomCandidate = doneY - 8;
+        final int usableHeight = Math.max(0, bottomCandidate - this.listTop);
+        final int alignedHeight = (usableHeight / ENTRY_HEIGHT) * ENTRY_HEIGHT;
+        // Keep at least a couple of rows visible even on very small GUI scales.
+        final int minHeight = ENTRY_HEIGHT * 4;
+        final int targetBottom = this.listTop + Math.max(minHeight, alignedHeight);
+        this.listBottom = Math.min(bottomCandidate, targetBottom);
 
-        this.list = new EntityTypeSelectionList(this, mc, LIST_WIDTH, this.height, listTop, listBottom, 18);
-        this.list.setLeftPos(LIST_LEFT);
-        this.addWidget(this.list);
-
-        this.searchBox = new EditBox(this.font, LIST_LEFT, 18, LIST_WIDTH, 18,
-                new TranslatableComponent("screen." + EntityLibraryMod.MODID + ".search"));
+        this.searchBox = new EditBox(
+                this.font,
+                LIST_LEFT,
+                searchY,
+                LIST_WIDTH,
+                SEARCH_H,
+                Component.translatable("screen.entitylibrary.search")
+        );
         this.searchBox.setMaxLength(128);
-        this.searchBox.setResponder(s -> this.applyFilter());
+        this.searchBox.setBordered(true);
+        this.searchBox.setSuggestion(Component.translatable("screen.entitylibrary.search").getString());
+        this.searchBox.setResponder(this::applyFilter);
         this.addRenderableWidget(this.searchBox);
 
-        // Close button
-        this.addRenderableWidget(new Button(
-                LIST_LEFT,
-                this.height - 28,
+        this.list = new EntityTypeSelectionList(
+                this,
+                mc,
                 LIST_WIDTH,
-                20,
-                new TranslatableComponent("gui.done"),
-                b -> this.onClose()
-        ));
+                // NeoForge 1.21.1's ObjectSelectionList constructor takes a "height" parameter
+                // that is used for internal clipping. Passing the full screen height can cause
+                // the list to clip rows at the bottom, even when we compute a proper bottom.
+                //
+                // Use the list's actual viewport height instead.
+                (this.listBottom - this.listTop),
+                this.listTop,
+                this.listBottom,
+                ENTRY_HEIGHT
+        );
+        this.list.setX(LIST_LEFT);
+        this.addRenderableWidget(this.list);
 
-        applyFilter();
+        // Done button
+        this.addRenderableWidget(
+                Button.builder(Component.translatable("gui.done"), b -> this.onClose())
+                        .bounds(this.width - 90 - PADDING, this.height - 24, 90, 20)
+                        .build()
+        );
 
-        // Select first entry by default.
-        if (this.selectedId == null && !this.filteredEntityIds.isEmpty()) {
-            selectEntityId(this.filteredEntityIds.get(0));
-        }
-    }
-
-    private void applyFilter() {
-        String needle = this.searchBox == null ? "" : this.searchBox.getValue().trim().toLowerCase(Locale.ROOT);
-
-        this.filteredEntityIds.clear();
-
-        for (ResourceLocation id : this.allEntityIds) {
-            // Search filter first (cheap), then optional LivingEntity-only filter (potentially expensive).
-            if (!needle.isEmpty()) {
-                String s = id.toString().toLowerCase(Locale.ROOT);
-                if (!s.contains(needle)) {
-                    continue;
-                }
-            }
-
-            if (this.hideNonLivingEntityTypes && !isLivingEntityType(id)) {
-                continue;
-            }
-
-            this.filteredEntityIds.add(id);
-        }
-
-        this.list.setEntries(this.filteredEntityIds, this.selectedId);
-
-        // If the current selection is no longer visible, clear it so the user doesn't see stale data.
-        if (this.selectedId != null && !this.filteredEntityIds.contains(this.selectedId)) {
-            this.selectedId = null;
-            this.previewEntity = null;
-            this.previewError = null;
-        }
-    }
-
-    private boolean isLivingEntityType(ResourceLocation id) {
-        return this.livingTypeCache.computeIfAbsent(id, key -> {
-            Minecraft mc = Minecraft.getInstance();
-            if (mc.level == null) {
-                return false;
-            }
-
-            var type = ForgeRegistries.ENTITIES.getValue(key);
-            if (type == null) {
-                return false;
-            }
-
-            try {
-                Entity e = type.create(mc.level);
-                return e instanceof LivingEntity;
-            } catch (Throwable t) {
-                // If an entity can't be created client-side, treat it as non-previewable and hide it.
-                return false;
-            }
-        });
-    }
-
-    public void selectEntityId(ResourceLocation id) {
-        if (id.equals(this.selectedId)) {
-            return;
-        }
-
-        this.selectedId = id;
-        this.previewError = null;
-        this.previewEntity = null;
-
-        rebuildPreviewEntity();
-    }
-
-    private void rebuildPreviewEntity() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) {
-            this.previewError = "Join a world to preview entities.";
-            return;
-        }
-        if (this.selectedId == null) {
-            return;
-        }
-
-        var type = ForgeRegistries.ENTITIES.getValue(this.selectedId);
-        if (type == null) {
-            this.previewError = "Unknown entity type: " + this.selectedId;
-            return;
-        }
-
-        try {
-            Entity e = type.create(mc.level);
-            if (e == null) {
-                this.previewError = "This entity type cannot be instantiated on the client.";
-                return;
-            }
-
-            // Ensure it stays a pure preview.
-            e.setPos(0.0D, 0.0D, 0.0D);
-            e.setSilent(true);
-            e.setInvulnerable(true);
-            if (e instanceof Mob mob) {
-                mob.setNoAi(true);
-            }
-
-            this.previewEntity = e;
-
-            if (!this.userScaled && e instanceof LivingEntity living) {
-                float h = Math.max(0.5F, living.getBbHeight());
-                int auto = (int) Math.max(20, Math.min(90, 55.0F / h));
-                this.previewScale = auto;
-            }
-        } catch (Throwable t) {
-            this.previewError = "Preview failed: " + t.getClass().getSimpleName();
-            this.previewEntity = null;
-        }
+        populateList();
+        applyFilter(this.searchBox.getValue());
     }
 
     @Override
     public void tick() {
         super.tick();
-        if (this.searchBox != null) {
-            this.searchBox.tick();
+    }
+
+    private void populateList() {
+        final Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
+            return;
         }
 
-        // If the level changed (e.g. dimension switch), refresh the preview entity.
-        // (We keep it simple and recreate whenever we have a selection but no preview.)
-        if (this.selectedId != null && this.previewEntity == null && this.previewError == null) {
-            rebuildPreviewEntity();
+        final List<ResourceLocation> livingIds = new ArrayList<>();
+        for (final ResourceLocation id : BuiltInRegistries.ENTITY_TYPE.keySet()) {
+            try {
+                final EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(id);
+                final Entity created = type.create(mc.level);
+                if (created instanceof LivingEntity) {
+                    livingIds.add(id);
+                }
+            } catch (Throwable ignored) {
+                // Some modded entity types may not be safely creatable on a ClientLevel.
+            }
+        }
+
+        livingIds.sort(Comparator.comparing(ResourceLocation::toString));
+        this.list.setAllIds(livingIds);
+    }
+
+    private void applyFilter(final String rawQuery) {
+        final String query = rawQuery == null ? "" : rawQuery.toLowerCase(Locale.ROOT).trim();
+        this.list.applyFilter(query);
+    }
+
+    void onSelected(final ResourceLocation id) {
+        this.selectedId = id;
+        this.previewEntity = createPreviewEntity(id);
+    }
+
+    private LivingEntity createPreviewEntity(final ResourceLocation id) {
+        final Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
+            return null;
+        }
+
+        final EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(id);
+        try {
+            final Entity created = type.create(mc.level);
+            if (!(created instanceof LivingEntity living)) {
+                return null;
+            }
+
+            living.setSilent(true);
+            living.setInvulnerable(true);
+            if (living instanceof Mob mob) {
+                mob.setNoAi(true);
+            }
+
+            return living;
+        } catch (Throwable t) {
+            return null;
         }
     }
 
     @Override
-    public void render(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
-        this.renderBackground(poseStack);
+    public void render(final GuiGraphics gg, final int mouseX, final int mouseY, final float partialTick) {
+        this.renderBackground(gg, mouseX, mouseY, partialTick);
+
+        super.render(gg, mouseX, mouseY, partialTick);
 
         // Title
-        this.font.draw(poseStack, this.title, LIST_LEFT, 6, 0xFFFFFF);
+        gg.drawString(this.font, this.title, LIST_LEFT, TITLE_Y, 0xFFFFFF, false);
 
-        // Widgets
-        super.render(poseStack, mouseX, mouseY, partialTicks);
-        this.list.render(poseStack, mouseX, mouseY, partialTicks);
+        // Right panel bounds
+        final int panelLeft = LIST_LEFT + LIST_WIDTH + PADDING;
+        final int panelRight = this.width - PADDING;
+        final int panelTop = this.listTop;
+        final int panelBottom = this.listBottom;
 
-        // Right-side preview panel
-        int panelLeft = LIST_LEFT + LIST_WIDTH + 16;
-        int panelRight = this.width - 12;
-        int panelTop = 18;
+        // Panel background
+        gg.fill(panelLeft, panelTop, panelRight, panelBottom, 0xAA000000);
+        gg.fill(panelLeft + 1, panelTop + 1, panelRight - 1, panelBottom - 1, 0x66000000);
 
-        // Basic instructions
-        int y = panelTop;
-        this.font.draw(poseStack, new TextComponent("Search / click an entity to preview"), panelLeft, y, 0xC0C0C0);
-        y += 12;
-        this.font.draw(poseStack, new TextComponent("Mouse wheel over preview: scale"), panelLeft, y, 0xC0C0C0);
-        y += 18;
+        // Compute preview box inside panel
+        previewX1 = panelLeft + 10;
+        previewY1 = panelTop + 28;
+        previewX2 = panelRight - 10;
+        previewY2 = panelBottom - 64;
 
-        if (this.selectedId == null) {
-            this.font.draw(poseStack, new TextComponent("No selection"), panelLeft, y, 0xFFFFFF);
-            return;
+        // Header text
+        final String sel = (selectedId == null) ? "(none)" : selectedId.toString();
+        gg.drawString(this.font, Component.literal(sel), panelLeft + 8, panelTop + 6, 0xFFFFFF, false);
+
+        // Preview
+        if (previewEntity != null) {
+            final int w = Math.max(20, previewX2 - previewX1);
+            final int h = Math.max(20, previewY2 - previewY1);
+            final int scaleLimit = (int) Math.min(w / 2.2f, h / 2.2f);
+            final int scale = Math.max(20, Math.min(this.previewScale, scaleLimit));
+
+            // Render the entity inside the preview rectangle.
+            // The entity is NOT added to the world.
+            InventoryScreen.renderEntityInInventoryFollowsMouse(
+                    gg,
+                    previewX1,
+                    previewY1,
+                    previewX2,
+                    previewY2,
+                    scale,
+                    0.0f,
+                    (float) mouseX,
+                    (float) mouseY,
+                    previewEntity
+            );
+        } else {
+            gg.drawCenteredString(this.font, Component.literal("Select an entity"), (panelLeft + panelRight) / 2, (previewY1 + previewY2) / 2, 0xAAAAAA);
         }
 
-        this.font.draw(poseStack, new TextComponent("Selected: " + this.selectedId), panelLeft, y, 0xFFFFFF);
-        y += 12;
-        this.font.draw(poseStack, new TextComponent("Summon: /summon " + this.selectedId + " ~ ~ ~"), panelLeft, y, 0xC0C0C0);
-        y += 18;
-
-        if (this.previewError != null) {
-            this.font.draw(poseStack, new TextComponent(this.previewError), panelLeft, y, 0xFF8080);
-            return;
-        }
-
-        if (!(this.previewEntity instanceof LivingEntity living)) {
-            this.font.draw(poseStack, new TextComponent("Preview available for LivingEntity types only."), panelLeft, y, 0xFF8080);
-            return;
-        }
-
-        // Render the preview roughly centered in the right panel.
-        int previewCenterX = (panelLeft + panelRight) / 2;
-        int previewBaseY = this.height - 70;
-
-        float dx = (float) (previewCenterX - mouseX);
-        float dy = (float) (previewBaseY - mouseY);
-
-        EntityPreviewRenderer.render(previewCenterX, previewBaseY, this.previewScale, dx, dy, living);
-
-        // Small footer info
-        this.font.draw(poseStack, new TextComponent("Scale: " + this.previewScale), panelLeft, this.height - 52, 0xC0C0C0);
-        this.font.draw(poseStack, new TextComponent("This is a visual preview only (entity is never added to the world)."), panelLeft, this.height - 40, 0xC0C0C0);
+        // Summon hint
+        final int hintY = panelBottom - 54;
+        gg.drawString(this.font, Component.literal("Summon hint:"), panelLeft + 8, hintY, 0xCCCCCC, false);
+        final String cmd = selectedId == null ? "/summon <id> ~ ~ ~" : ("/summon " + selectedId + " ~ ~ ~");
+        gg.drawString(this.font, Component.literal(cmd), panelLeft + 8, hintY + 12, 0xFFFFFF, false);
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        int panelLeft = LIST_LEFT + LIST_WIDTH + 16;
-        if (mouseX >= panelLeft && this.previewEntity instanceof LivingEntity) {
-            this.userScaled = true;
-            int step = delta > 0 ? 2 : -2;
-            this.previewScale = clamp(this.previewScale + step, 10, 200);
+    public boolean mouseScrolled(final double mouseX, final double mouseY, final double scrollX, final double scrollY) {
+        if (isMouseOverPreview(mouseX, mouseY)) {
+            final int step = (scrollY > 0) ? 4 : -4;
+            this.previewScale = Math.max(20, Math.min(200, this.previewScale + step));
             return true;
         }
-        return super.mouseScrolled(mouseX, mouseY, delta);
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
-    private static int clamp(int v, int min, int max) {
-        return Math.max(min, Math.min(max, v));
+    private boolean isMouseOverPreview(final double mouseX, final double mouseY) {
+        return mouseX >= previewX1 && mouseX <= previewX2 && mouseY >= previewY1 && mouseY <= previewY2;
     }
 
     @Override
     public void onClose() {
-        Minecraft.getInstance().setScreen(this.previous);
+        Minecraft.getInstance().setScreen(this.parent);
+    }
+
+    @Override
+    public boolean isPauseScreen() {
+        return false;
     }
 }
