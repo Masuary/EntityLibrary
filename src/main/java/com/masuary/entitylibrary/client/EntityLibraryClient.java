@@ -1,6 +1,7 @@
 package com.masuary.entitylibrary.client;
 
 import com.masuary.entitylibrary.EntityLibraryMod;
+import com.masuary.entitylibrary.client.EntityLibraryClientData;
 import com.masuary.entitylibrary.client.screen.EntityLibraryScreen;
 import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
@@ -19,6 +20,8 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 public final class EntityLibraryClient {
 
     public EntityLibraryClient(final IEventBus modEventBus, final ModContainer container) {
+        // Load client UI state (favorites/recents/settings) early so the screen can use it immediately.
+        EntityLibraryClientData.get();
         modEventBus.addListener(this::onRegisterKeyMappings);
         NeoForge.EVENT_BUS.register(this);
     }

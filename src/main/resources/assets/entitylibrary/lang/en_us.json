@@ -1,5 +1,15 @@
 {
   "screen.entitylibrary.title": "Entity Library",
   "screen.entitylibrary.search": "Search...",
+  "screen.entitylibrary.tooltip.view_all": "Show all living entities.",
+  "screen.entitylibrary.tooltip.view_favorites": "Show your favorited entities.",
+  "screen.entitylibrary.tooltip.view_recent": "Show entities you selected recently.",
+  "screen.entitylibrary.tooltip.toggle_ids": "Toggle displaying entity IDs in the list.",
+  "screen.entitylibrary.tooltip.toggle_sort": "Toggle list sorting between name and ID (disabled in Recent view).",
+  "screen.entitylibrary.tooltip.filter_mod": "Cycle the namespace/mod filter.",
+  "screen.entitylibrary.tooltip.toggle_favorite": "Add or remove the selected entity from Favorites.",
+  "screen.entitylibrary.tooltip.copy_summon": "Copy a /summon command for the selected entity to your clipboard.",
+  "screen.entitylibrary.tooltip.copy_id": "Copy the selected entity ID to your clipboard.",
+  "screen.entitylibrary.tooltip.done": "Close this screen.",
   "key.entitylibrary.open": "Open Entity Library"
 }
