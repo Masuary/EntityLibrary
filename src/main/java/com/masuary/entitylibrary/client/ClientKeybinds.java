@@ -1,6 +1,8 @@
 package com.masuary.entitylibrary.client;
 
 import com.masuary.entitylibrary.EntityLibraryMod;
+import com.masuary.entitylibrary.client.data.FavoritesManager;
+import com.masuary.entitylibrary.client.data.ThemeManager;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraftforge.api.distmarker.Dist;
@@ -27,7 +29,11 @@ public final class ClientKeybinds {
         @SubscribeEvent
         public static void onClientSetup(FMLClientSetupEvent event) {
             // Forge 1.18.2 does not have RegisterKeyMappingsEvent; register during client setup.
-            event.enqueueWork(() -> ClientRegistry.registerKeyBinding(OPEN_LIBRARY));
+            event.enqueueWork(() -> {
+                ClientRegistry.registerKeyBinding(OPEN_LIBRARY);
+                ThemeManager.get().load();
+                FavoritesManager.get().load();
+            });
         }
     }
 }

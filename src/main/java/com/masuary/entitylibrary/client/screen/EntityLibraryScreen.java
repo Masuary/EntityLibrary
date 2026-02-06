@@ -1,11 +1,14 @@
 package com.masuary.entitylibrary.client.screen;
 
 import com.masuary.entitylibrary.EntityLibraryMod;
+import com.masuary.entitylibrary.client.data.FavoritesManager;
+import com.masuary.entitylibrary.client.data.LootTableParser;
+import com.masuary.entitylibrary.client.data.Theme;
+import com.masuary.entitylibrary.client.data.ThemeManager;
 import com.mojang.blaze3d.platform.Window;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
 import org.lwjgl.opengl.GL11;
-import net.minecraft.client.gui.GuiComponent;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -41,7 +44,7 @@ public class EntityLibraryScreen extends Screen {
     private static final Map<ResourceLocation, String> displayNameCache = new HashMap<>();
 
     private enum FilterCategory {
-        ALL, LIVING, HOSTILE, PASSIVE;
+        ALL, LIVING, HOSTILE, PASSIVE, FAVORITES;
 
         FilterCategory next() {
             FilterCategory[] values = values();
@@ -54,6 +57,7 @@ public class EntityLibraryScreen extends Screen {
                 case LIVING -> TRANSLATION_PREFIX + "filter.living";
                 case HOSTILE -> TRANSLATION_PREFIX + "filter.hostile";
                 case PASSIVE -> TRANSLATION_PREFIX + "filter.passive";
+                case FAVORITES -> TRANSLATION_PREFIX + "filter.favorites";
             };
         }
     }
@@ -97,11 +101,18 @@ public class EntityLibraryScreen extends Screen {
     private String cachedMaxHealth = "";
     private String cachedDimensions = "";
     private String cachedCategory = "";
+    private String cachedDrops = "";
+
+    private boolean animatePreview = false;
 
     private Button filterButton;
     private Button namespaceButton;
     private Button copyButton;
     private Button resetScaleButton;
+    private Button nbtButton;
+    private Button favoriteButton;
+    private Button animateButton;
+    private Button themeButton;
 
     public EntityLibraryScreen(@Nullable Screen previous) {
         super(new TranslatableComponent(TRANSLATION_PREFIX + "title"));
@@ -204,12 +215,66 @@ public class EntityLibraryScreen extends Screen {
         this.resetScaleButton.visible = false;
         this.addRenderableWidget(this.resetScaleButton);
 
+        this.nbtButton = new Button(
+                panelContentRight - 86, 0, 40, 16,
+                new TranslatableComponent(TRANSLATION_PREFIX + "edit_nbt"),
+                b -> {
+                    if (this.selectedId != null) {
+                        Minecraft.getInstance().setScreen(new NbtEditorScreen(this, this.selectedId, cachedSummonCommand));
+                    }
+                }
+        );
+        this.nbtButton.visible = false;
+        this.addRenderableWidget(this.nbtButton);
+
+        this.favoriteButton = new Button(
+                0, 0, 16, 16,
+                new TextComponent("\u2606"),
+                b -> {
+                    if (this.selectedId != null) {
+                        FavoritesManager.get().toggle(this.selectedId);
+                        updateFavoriteButtonLabel();
+                        if (currentFilter == FilterCategory.FAVORITES) {
+                            applyFilter();
+                        }
+                    }
+                }
+        );
+        this.favoriteButton.visible = false;
+        this.addRenderableWidget(this.favoriteButton);
+
+        this.animateButton = new Button(
+                rightPanelRight - 112, rightPanelBottom - 24, 52, 16,
+                buildAnimateLabel(),
+                b -> {
+                    this.animatePreview = !this.animatePreview;
+                    b.setMessage(buildAnimateLabel());
+                }
+        );
+        this.animateButton.visible = false;
+        this.addRenderableWidget(this.animateButton);
+
+        int themeButtonWidth = 50;
+        this.themeButton = new Button(
+                LIST_LEFT + LIST_WIDTH - themeButtonWidth, 0, themeButtonWidth, 16,
+                buildThemeLabel(),
+                b -> {
+                    ThemeManager.get().toggle();
+                    b.setMessage(buildThemeLabel());
+                }
+        );
+        this.addRenderableWidget(this.themeButton);
+
         applyFilter();
 
         if (this.selectedId != null) {
             cacheEntityMetadata();
             this.copyButton.visible = true;
             this.resetScaleButton.visible = true;
+            this.nbtButton.visible = true;
+            this.favoriteButton.visible = true;
+            this.animateButton.visible = true;
+            updateFavoriteButtonLabel();
         } else if (!this.filteredEntityIds.isEmpty()) {
             selectEntityId(this.filteredEntityIds.get(0));
         }
@@ -244,6 +309,7 @@ public class EntityLibraryScreen extends Screen {
                         || category == MobCategory.UNDERGROUND_WATER_CREATURE
                         || category == MobCategory.AXOLOTLS;
             }
+            case FAVORITES -> FavoritesManager.get().isFavorite(id);
         };
     }
 
@@ -310,6 +376,9 @@ public class EntityLibraryScreen extends Screen {
             this.previewError = null;
             this.copyButton.visible = false;
             this.resetScaleButton.visible = false;
+            this.nbtButton.visible = false;
+            this.favoriteButton.visible = false;
+            this.animateButton.visible = false;
         }
     }
 
@@ -365,6 +434,16 @@ public class EntityLibraryScreen extends Screen {
         if (this.resetScaleButton != null) {
             this.resetScaleButton.visible = true;
         }
+        if (this.nbtButton != null) {
+            this.nbtButton.visible = true;
+        }
+        if (this.favoriteButton != null) {
+            this.favoriteButton.visible = true;
+            updateFavoriteButtonLabel();
+        }
+        if (this.animateButton != null) {
+            this.animateButton.visible = true;
+        }
     }
 
     private void cacheEntityMetadata() {
@@ -375,6 +454,7 @@ public class EntityLibraryScreen extends Screen {
             cachedMaxHealth = "";
             cachedDimensions = "";
             cachedCategory = "";
+            cachedDrops = "";
             return;
         }
 
@@ -399,12 +479,41 @@ public class EntityLibraryScreen extends Screen {
         } else {
             cachedMaxHealth = "";
         }
+
+        List<String> drops = LootTableParser.getDrops(this.selectedId);
+        if (drops == null) {
+            cachedDrops = new TranslatableComponent(TRANSLATION_PREFIX + "drops.unavailable").getString();
+        } else if (drops.isEmpty()) {
+            cachedDrops = new TranslatableComponent(TRANSLATION_PREFIX + "drops.none").getString();
+        } else {
+            cachedDrops = new TranslatableComponent(TRANSLATION_PREFIX + "drops.prefix").getString()
+                    + " " + String.join(", ", drops);
+        }
     }
 
     private String formatCategory(MobCategory category) {
         String name = category.name().toLowerCase(Locale.ROOT);
         return name.substring(0, 1).toUpperCase(Locale.ROOT)
                 + name.substring(1).replace('_', ' ');
+    }
+
+    private Component buildAnimateLabel() {
+        String key = animatePreview
+                ? TRANSLATION_PREFIX + "animate.on"
+                : TRANSLATION_PREFIX + "animate.off";
+        return new TranslatableComponent(key);
+    }
+
+    private Component buildThemeLabel() {
+        return new TextComponent(ThemeManager.get().isDark() ? "Dark" : "Light");
+    }
+
+    private void updateFavoriteButtonLabel() {
+        if (this.favoriteButton == null || this.selectedId == null) {
+            return;
+        }
+        boolean isFav = FavoritesManager.get().isFavorite(this.selectedId);
+        this.favoriteButton.setMessage(new TextComponent(isFav ? "\u2605" : "\u2606"));
     }
 
     private void autoCalculateScale() {
@@ -477,27 +586,28 @@ public class EntityLibraryScreen extends Screen {
         if (this.selectedId != null && this.previewEntity == null && this.previewError == null) {
             rebuildPreviewEntity();
         }
+
+        if (this.animatePreview && this.previewEntity instanceof LivingEntity living) {
+            living.tickCount++;
+            living.animationSpeed = 0.6F;
+            living.animationPosition += 0.6F;
+        }
     }
 
     @Override
     public void render(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
-        this.renderBackground(poseStack);
+        Theme theme = ThemeManager.get().currentTheme();
 
-        GuiComponent.fill(poseStack, rightPanelLeft - 4, rightPanelTop, rightPanelRight + 4, rightPanelBottom, 0xCC0A0A0A);
-
-        int borderColor = 0xFF333333;
-        GuiComponent.fill(poseStack, rightPanelLeft - 5, rightPanelTop, rightPanelLeft - 4, rightPanelBottom, borderColor);
-        GuiComponent.fill(poseStack, rightPanelRight + 4, rightPanelTop, rightPanelRight + 5, rightPanelBottom, borderColor);
-        GuiComponent.fill(poseStack, rightPanelLeft - 5, rightPanelTop - 1, rightPanelRight + 5, rightPanelTop, borderColor);
-        GuiComponent.fill(poseStack, rightPanelLeft - 5, rightPanelBottom, rightPanelRight + 5, rightPanelBottom + 1, borderColor);
-
-        this.font.draw(poseStack, this.title, LIST_LEFT, 6, 0xFFFFFF);
-
-        super.render(poseStack, mouseX, mouseY, partialTicks);
-
-        int listRight = LIST_LEFT + LIST_WIDTH;
         int listTop = 68;
         int listBottom = this.height - 40;
+
+        TextureRenderer.drawTilingBackground(poseStack, 0, 0, this.width, this.height);
+        TextureRenderer.drawPanel(poseStack, LIST_LEFT - 4, listTop - 4, LIST_WIDTH + 8, listBottom - listTop + 8);
+        TextureRenderer.drawPanel(poseStack, rightPanelLeft - 8, rightPanelTop - 5, rightPanelRight - rightPanelLeft + 16, rightPanelBottom - rightPanelTop + 10);
+
+        this.font.draw(poseStack, this.title, LIST_LEFT, 6, theme.titleColor());
+
+        super.render(poseStack, mouseX, mouseY, partialTicks);
 
         Window window = Minecraft.getInstance().getWindow();
         double scale = window.getGuiScale();
@@ -510,12 +620,9 @@ public class EntityLibraryScreen extends Screen {
         this.list.render(poseStack, mouseX, mouseY, partialTicks);
         GL11.glDisable(GL11.GL_SCISSOR_TEST);
 
-        GuiComponent.fill(poseStack, LIST_LEFT, listTop - 1, listRight, listTop, 0xFF333333);
-        GuiComponent.fill(poseStack, LIST_LEFT, listBottom, listRight, listBottom + 1, 0xFF333333);
-
         String countText = this.filteredEntityIds.size() + " / " + this.allEntityIds.size();
         int countWidth = this.font.width(countText);
-        this.font.draw(poseStack, countText, (float) (LIST_LEFT + LIST_WIDTH - countWidth), 60.0F, 0x808080);
+        this.font.draw(poseStack, countText, (float) (LIST_LEFT + LIST_WIDTH - countWidth), 60.0F, theme.countText());
 
         int panelContentLeft = rightPanelLeft + 4;
         int panelContentRight = rightPanelRight - 4;
@@ -526,21 +633,24 @@ public class EntityLibraryScreen extends Screen {
             int hintWidth = this.font.width(hintText);
             int hintX = rightPanelLeft + (rightPanelRight - rightPanelLeft - hintWidth) / 2;
             int hintY = rightPanelTop + (rightPanelBottom - rightPanelTop) / 2 - 4;
-            this.font.draw(poseStack, hintText, hintX, hintY, 0x808080);
+            this.font.draw(poseStack, hintText, hintX, hintY, theme.noSelectionText());
             return;
         }
 
         int panelY = rightPanelTop + 6;
 
-        String truncatedDisplayName = this.font.plainSubstrByWidth(cachedDisplayName, panelMaxTextWidth);
-        this.font.drawShadow(poseStack, truncatedDisplayName, panelContentLeft, panelY, 0xFFFFFF);
+        this.favoriteButton.x = panelContentRight - 16;
+        this.favoriteButton.y = panelY - 4;
+
+        String truncatedDisplayName = this.font.plainSubstrByWidth(cachedDisplayName, panelMaxTextWidth - 22);
+        this.font.drawShadow(poseStack, truncatedDisplayName, panelContentLeft, panelY, theme.primaryText());
         panelY += 12;
 
         String truncatedRegistryId = this.font.plainSubstrByWidth(cachedRegistryId, panelMaxTextWidth);
-        this.font.draw(poseStack, truncatedRegistryId, panelContentLeft, panelY, 0x808080);
+        this.font.draw(poseStack, truncatedRegistryId, panelContentLeft, panelY, theme.secondaryText());
         panelY += 14;
 
-        GuiComponent.fill(poseStack, panelContentLeft, panelY, panelContentRight, panelY + 1, 0xFF333333);
+        TextureRenderer.drawSeparator(poseStack, panelContentLeft, panelY, panelContentRight - panelContentLeft);
         panelY += 6;
 
         if (!cachedMaxHealth.isEmpty()) {
@@ -549,27 +659,36 @@ public class EntityLibraryScreen extends Screen {
                 healthAndSize += "    " + cachedDimensions;
             }
             String truncatedStats = this.font.plainSubstrByWidth(healthAndSize, panelMaxTextWidth);
-            this.font.draw(poseStack, truncatedStats, panelContentLeft, panelY, 0xC0C0C0);
+            this.font.draw(poseStack, truncatedStats, panelContentLeft, panelY, theme.statsText());
             panelY += 12;
         } else if (!cachedDimensions.isEmpty()) {
             String truncatedDimensions = this.font.plainSubstrByWidth(cachedDimensions, panelMaxTextWidth);
-            this.font.draw(poseStack, truncatedDimensions, panelContentLeft, panelY, 0xC0C0C0);
+            this.font.draw(poseStack, truncatedDimensions, panelContentLeft, panelY, theme.statsText());
             panelY += 12;
         }
 
         if (!cachedCategory.isEmpty()) {
             String truncatedCategory = this.font.plainSubstrByWidth(cachedCategory, panelMaxTextWidth);
-            this.font.draw(poseStack, truncatedCategory, panelContentLeft, panelY, 0xC0C0C0);
+            this.font.draw(poseStack, truncatedCategory, panelContentLeft, panelY, theme.statsText());
+            panelY += 12;
+        }
+
+        if (!cachedDrops.isEmpty()) {
+            String truncatedDrops = this.font.plainSubstrByWidth(cachedDrops, panelMaxTextWidth);
+            this.font.draw(poseStack, truncatedDrops, panelContentLeft, panelY, theme.statsText());
             panelY += 12;
         }
 
         panelY += 2;
 
-        String truncatedSummon = this.font.plainSubstrByWidth(cachedSummonCommand, panelMaxTextWidth - 44);
-        this.font.draw(poseStack, truncatedSummon, panelContentLeft, panelY, 0x55FF55);
+        String truncatedSummon = this.font.plainSubstrByWidth(cachedSummonCommand, panelMaxTextWidth - 90);
+        this.font.draw(poseStack, truncatedSummon, panelContentLeft, panelY, theme.commandText());
 
         this.copyButton.x = panelContentRight - 40;
         this.copyButton.y = panelY - 2;
+
+        this.nbtButton.x = panelContentRight - 86;
+        this.nbtButton.y = panelY - 2;
 
         panelY += 18;
 
@@ -577,7 +696,7 @@ public class EntityLibraryScreen extends Screen {
 
         if (this.previewError != null) {
             String truncatedError = this.font.plainSubstrByWidth(this.previewError.getString(), panelMaxTextWidth);
-            this.font.draw(poseStack, truncatedError, panelContentLeft, panelY, 0xFF8080);
+            this.font.draw(poseStack, truncatedError, panelContentLeft, panelY, theme.errorText());
         } else if (this.previewEntity instanceof LivingEntity living) {
             int previewCenterX = (rightPanelLeft + rightPanelRight) / 2;
             int previewAreaBottom = rightPanelBottom - 28;
@@ -595,27 +714,30 @@ public class EntityLibraryScreen extends Screen {
         } else {
             String livingOnlyError = new TranslatableComponent(TRANSLATION_PREFIX + "error.living_only").getString();
             String truncatedLivingError = this.font.plainSubstrByWidth(livingOnlyError, panelMaxTextWidth);
-            this.font.draw(poseStack, truncatedLivingError, panelContentLeft, panelY, 0xFF8080);
+            this.font.draw(poseStack, truncatedLivingError, panelContentLeft, panelY, theme.errorText());
         }
 
-        int resetButtonWidth = this.resetScaleButton.visible ? 52 : 0;
-        int hintMaxWidth = panelMaxTextWidth - resetButtonWidth;
+        int bottomButtonsWidth = (this.resetScaleButton.visible ? 52 : 0) + (this.animateButton.visible ? 56 : 0);
+        int hintMaxWidth = panelMaxTextWidth - bottomButtonsWidth;
         int hintY = rightPanelBottom - 24;
         String dragHint = this.font.plainSubstrByWidth(new TranslatableComponent(TRANSLATION_PREFIX + "hint.drag_rotate").getString(), hintMaxWidth);
         String scrollHint = this.font.plainSubstrByWidth(new TranslatableComponent(TRANSLATION_PREFIX + "hint.scroll_scale").getString(), hintMaxWidth);
-        this.font.draw(poseStack, dragHint, panelContentLeft, hintY, 0x606060);
-        this.font.draw(poseStack, scrollHint, panelContentLeft, hintY + 10, 0x606060);
+        this.font.draw(poseStack, dragHint, panelContentLeft, hintY, theme.hintText());
+        this.font.draw(poseStack, scrollHint, panelContentLeft, hintY + 10, theme.hintText());
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (super.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
         if (button == 0 && mouseX >= rightPanelLeft && mouseX <= rightPanelRight
                 && mouseY >= rightPanelTop + 80 && mouseY <= rightPanelBottom - 28
                 && this.previewEntity instanceof LivingEntity) {
             this.isDraggingPreview = true;
             return true;
         }
-        return super.mouseClicked(mouseX, mouseY, button);
+        return false;
     }
 
     @Override

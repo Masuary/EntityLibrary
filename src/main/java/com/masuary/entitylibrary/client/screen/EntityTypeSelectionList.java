@@ -1,5 +1,8 @@
 package com.masuary.entitylibrary.client.screen;
 
+import com.masuary.entitylibrary.client.data.FavoritesManager;
+import com.masuary.entitylibrary.client.data.Theme;
+import com.masuary.entitylibrary.client.data.ThemeManager;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -21,7 +24,7 @@ public class EntityTypeSelectionList extends ObjectSelectionList<EntityTypeSelec
         super(minecraft, width, height, top, bottom, itemHeight);
         this.parent = parent;
         this.font = minecraft.font;
-        this.setRenderBackground(true);
+        this.setRenderBackground(false);
         this.setRenderTopAndBottom(false);
     }
 
@@ -72,16 +75,27 @@ public class EntityTypeSelectionList extends ObjectSelectionList<EntityTypeSelec
 
         @Override
         public void render(PoseStack poseStack, int index, int y, int x, int rowWidth, int rowHeight, int mouseX, int mouseY, boolean isHovered, float partialTicks) {
+            Theme theme = ThemeManager.get().currentTheme();
             boolean isSelected = EntityTypeSelectionList.this.getSelected() == this;
-            int nameColor = isSelected ? 0xFFFFFF : 0xE0E0E0;
-            int idColor = isSelected ? 0xA0A0A0 : 0x808080;
+            int nameColor = isSelected ? theme.listSelectedText() : theme.listUnselectedText();
+            int idColor = isSelected ? theme.listSelectedIdText() : theme.listUnselectedIdText();
 
             Font font = EntityTypeSelectionList.this.font;
+            boolean isFavorite = FavoritesManager.get().isFavorite(this.id);
             int maxTextWidth = rowWidth - 6;
+
             String truncatedName = font.plainSubstrByWidth(this.displayName, maxTextWidth);
             String truncatedId = font.plainSubstrByWidth(this.id.toString(), maxTextWidth);
 
-            font.draw(poseStack, truncatedName, (float) (x + 3), (float) (y + 1), nameColor);
+            if (isFavorite) {
+                String star = "\u2605 ";
+                int starWidth = font.width(star);
+                font.draw(poseStack, star, (float) (x + 3), (float) (y + 1), theme.favoriteStarColor());
+                String remainingName = font.plainSubstrByWidth(this.displayName, maxTextWidth - starWidth);
+                font.draw(poseStack, remainingName, (float) (x + 3 + starWidth), (float) (y + 1), nameColor);
+            } else {
+                font.draw(poseStack, truncatedName, (float) (x + 3), (float) (y + 1), nameColor);
+            }
             font.draw(poseStack, truncatedId, (float) (x + 3), (float) (y + 12), idColor);
         }
 
