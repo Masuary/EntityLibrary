@@ -1,7 +1,8 @@
 package com.masuary.entitylibrary.client.screen;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.platform.Lighting;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Quaternion;
 import com.mojang.math.Vector3f;
 import net.minecraft.client.Minecraft;
@@ -9,34 +10,17 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.world.entity.LivingEntity;
 
-/**
- * Standalone version of the vanilla "render entity in inventory" helper.
- *
- * Renders a LivingEntity preview without adding it to the world.
- */
 public final class EntityPreviewRenderer {
     private EntityPreviewRenderer() {}
 
-    /**
-     * @param x screen-space x (pixels) where the entity should be centered
-     * @param y screen-space y (pixels) where the entity should stand on the baseline
-     * @param scale entity scale factor in pixels
-     * @param mouseX used for yaw rotation (screen mouse delta)
-     * @param mouseY used for pitch rotation (screen mouse delta)
-     */
-    public static void render(int x, int y, int scale, float mouseX, float mouseY, LivingEntity entity) {
-        float yaw = (float) Math.atan(mouseX / 40.0F);
-        float pitch = (float) Math.atan(mouseY / 40.0F);
-
-        // Push a model-view transform into RenderSystem (this matches how vanilla GUI entity previews are done).
+    public static void render(int x, int y, int scale, float yaw, float pitch, LivingEntity entity) {
         var modelViewStack = RenderSystem.getModelViewStack();
         modelViewStack.pushPose();
         modelViewStack.translate((double) x, (double) y, 1050.0D);
         modelViewStack.scale(1.0F, 1.0F, -1.0F);
         RenderSystem.applyModelViewMatrix();
 
-        // Separate stack that will be handed into the entity renderer.
-        var poseStack = new com.mojang.blaze3d.vertex.PoseStack();
+        var poseStack = new PoseStack();
         poseStack.translate(0.0D, 0.0D, 1000.0D);
         poseStack.scale((float) scale, (float) scale, (float) scale);
 
@@ -45,7 +29,6 @@ public final class EntityPreviewRenderer {
         rotZ.mul(rotX);
         poseStack.mulPose(rotZ);
 
-        // Backup entity rotations so we can restore afterwards.
         float prevBodyRot = entity.yBodyRot;
         float prevYRot = entity.getYRot();
         float prevXRot = entity.getXRot();
@@ -72,7 +55,6 @@ public final class EntityPreviewRenderer {
         buffers.endBatch();
         dispatcher.setRenderShadow(true);
 
-        // Restore entity state.
         entity.yBodyRot = prevBodyRot;
         entity.setYRot(prevYRot);
         entity.setXRot(prevXRot);

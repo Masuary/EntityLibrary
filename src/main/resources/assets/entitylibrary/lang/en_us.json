@@ -1,5 +1,21 @@
 {
   "screen.entitylibrary.title": "Entity Library",
   "screen.entitylibrary.search": "Search...",
+  "screen.entitylibrary.filter.all": "Filter: All",
+  "screen.entitylibrary.filter.living": "Filter: Living",
+  "screen.entitylibrary.filter.hostile": "Filter: Hostile",
+  "screen.entitylibrary.filter.passive": "Filter: Passive",
+  "screen.entitylibrary.mod.all": "Mod: All",
+  "screen.entitylibrary.mod.prefix": "Mod: %s",
+  "screen.entitylibrary.no_selection": "Select an entity to preview",
+  "screen.entitylibrary.hint.drag_rotate": "Drag to rotate",
+  "screen.entitylibrary.hint.scroll_scale": "Scroll to scale",
+  "screen.entitylibrary.copy": "Copy",
+  "screen.entitylibrary.reset": "Reset",
+  "screen.entitylibrary.error.no_world": "Join a world to preview entities.",
+  "screen.entitylibrary.error.unknown_entity": "Unknown entity type: %s",
+  "screen.entitylibrary.error.cannot_instantiate": "This entity type cannot be instantiated on the client.",
+  "screen.entitylibrary.error.living_only": "Preview available for LivingEntity types only.",
+  "screen.entitylibrary.error.preview_failed": "Preview failed: %s",
   "key.entitylibrary.open": "Open Entity Library"
 }

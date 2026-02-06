@@ -19,11 +19,7 @@ public final class ClientForgeEvents {
         }
 
         Minecraft mc = Minecraft.getInstance();
-        if (mc == null) {
-            return;
-        }
 
-        // Only open while in-game (must have a level) to ensure entity types can be instantiated safely.
         if (mc.level == null) {
             return;
         }
